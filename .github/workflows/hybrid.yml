@@ -1,0 +1,40 @@
+name: Azure Boards Hybrid Automation
+
+on:
+  repository_dispatch:
+    types: [create-branch, create-pr]
+
+jobs:
+  hybrid-job:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare vars
+        id: vars
+        run: |
+          BRANCH="${{ github.event.client_payload.prefix }}/${{ github.event.client_payload.ticket }}"
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Create branch
+        if: github.event.action == 'create-branch'
+        run: |
+          git config user.name "Github Actions"
+          git config user.email "actions@github.com"
+          git checkout -b "${{ steps.vars.outputs.branch }}"
+          git push origin "${{ steps.vars.outputs.branch }}"
+
+      - name: Create PR
+        if: github.event.action == 'create-pr'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: "${{ steps.vars.outputs.branch }}"
+          base: main
+          title: "${{ github.event.client_payload.title }}"
+          body: "Fixes AB#${{ github.event.client_payload.ticket }}"
+          draft: false
