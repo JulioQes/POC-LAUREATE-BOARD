@@ -14,21 +14,28 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup GitHub Pages
-        uses: actions/configure-pages@v5
+      # Necesario para Pages + Functions
+      - uses: actions/configure-pages@v5
 
-      - name: Upload Functions for Pages
+      # Construye el artifact con la estructura correcta
+      - name: Prepare artifact structure
+        run: |
+          mkdir -p site/.functions
+          cp .github/pages/index.html site/index.html
+          cp .github/pages/functions/functions.json site/.functions/functions.json
+          cp .github/pages/functions/github-hook.js site/.functions/github-hook.js
+
+      - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ".github/pages"
+          path: site
 
   deploy:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy to GitHub Pages 🚀
-        uses: actions/deploy-pages@v4
+      - uses: actions/deploy-pages@v4
