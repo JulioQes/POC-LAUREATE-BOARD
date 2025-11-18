@@ -1,5 +1,5 @@
 {
   "github-hook": {
-    "entry": "github-hook.func.js"
+    "entry": "github-hook.js"
   }
 }
