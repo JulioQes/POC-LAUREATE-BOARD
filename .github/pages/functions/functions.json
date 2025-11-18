@@ -1,0 +1,5 @@
+{
+  "github-hook": {
+    "entrypoint": "github-hook.js"
+  }
+}
