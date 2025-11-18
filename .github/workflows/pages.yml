@@ -1,4 +1,4 @@
-name: GitHub Pages Functions
+ name: GitHub Pages Functions
 
 on:
   push:
@@ -21,12 +21,11 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
-      # No build step needed for functions-only deployment
-
+      # Upload ONLY the functions folder
       - name: Upload Functions to Pages
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ".github/pages"
+          path: ".github/pages/functions"
 
   deploy:
     needs: build
