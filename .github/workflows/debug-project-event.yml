@@ -1,0 +1,16 @@
+name: DEBUG Project Event
+
+on:
+  projects_v2_item:
+    types: [edited, moved]
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dump GitHub Project v2 Event Payload
+        uses: actions/github-script@v7
+        with:
+          script: |
+            console.log("=== PROJECT ITEM EVENT PAYLOAD ===");
+            console.log(JSON.stringify(context.payload, null, 2));
