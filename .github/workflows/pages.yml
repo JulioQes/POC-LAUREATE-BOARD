@@ -2,8 +2,7 @@ name: GitHub Pages Functions
 
 on:
   push:
-    branches:
-      - main
+    branches: ["main"]
   workflow_dispatch:
 
 permissions:
@@ -12,30 +11,19 @@ permissions:
   id-token: write
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      # Necesario para Pages + Functions
-      - uses: actions/configure-pages@v5
-
-      # Construye el artifact con la estructura correcta
-      - name: Prepare artifact structure
-        run: |
-          mkdir -p site/.functions
-          cp .github/pages/index.html site/index.html
-          cp .github/pages/functions/functions.json site/.functions/functions.json
-          cp .github/pages/functions/github-hook.js site/.functions/github-hook.js
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: ".github/pages"
 
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/deploy-pages@v4
+      - name: Deploy
+        uses: actions/deploy-pages@v4
