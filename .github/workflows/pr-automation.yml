@@ -1,0 +1,109 @@
+name: Auto-PR on Project Status Change
+
+on:
+  # Trigger: Fires when an item (Issue/PR) is edited in a Project Board.
+  project_item:
+    types: [edited]
+
+jobs:
+  check_column_and_create_pr:
+    runs-on: ubuntu-latest
+    
+    # Job Condition: Ensures the 'Status' field has changed to either 'DEV' or 'QA'.
+    if: |
+      github.event.changes &&
+      github.event.changes.field_value.field_value.field.name == 'Status' &&
+      (github.event.changes.field_value.field_value.field_value.name == 'DEV' || 
+       github.event.changes.field_value.field_value.field_value.name == 'QA')
+      
+    steps:
+      - name: 🔍 Get Issue Details, Calculate Branch, and Create PR
+        uses: actions/github-script@v7
+        with:
+          # Use the PAT token with cross-repo write permissions (required for creating PRs).
+          github-token: ${{ secrets.GH_PAT }} 
+          script: |
+            const owner = 'JulioQes';
+            
+            // --- 1. EXTRACT DATA FROM PROJECT EVENT ---
+            const targetStatus = context.payload.changes.field_value.field_value.field_value.name; // 'DEV' or 'QA'
+            const issueNumber = context.payload.changes.field_value.field_value.field_value.issue.number;
+            const issueRepo = context.payload.changes.field_value.field_value.field_value.issue.repository.name;
+            const sourceIssueRepoOwner = context.payload.changes.field_value.field_value.field_value.issue.repository.owner.login;
+
+            // --- 2. FETCH ISSUE DETAILS (Needed to get BE/FE label and full title) ---
+            const { data: issue } = await github.rest.issues.get({
+                owner: sourceIssueRepoOwner,
+                repo: issueRepo,
+                issue_number: issueNumber,
+            });
+
+            const labels = issue.labels.map(label => label.name);
+            let targetCodeRepo = '';
+            let branchPrefix = '';
+            
+            // Determine the code repository based on labels
+            if (labels.includes('BE')) {
+                targetCodeRepo = 'POC-LAUREATE-BOARD-BE';
+                branchPrefix = 'be/';
+            } else if (labels.includes('FE')) {
+                targetCodeRepo = 'POC-LAUREATE-BOARD-FE';
+                branchPrefix = 'fe/';
+            } else {
+                console.log('Issue moved but missing BE/FE label. Skipping PR creation.');
+                return;
+            }
+
+            // --- 3. CALCULATE BRANCH NAMES AND PR TARGET ---
+            const prTitle = issue.title;
+            const cleanTitle = issue.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-*|-*$/g, '').substring(0, 30);
+            const featureBranch = `${branchPrefix}issue-${issueNumber}-${cleanTitle}`; // Head (Source Branch)
+            
+            // Set the dynamic base branch based on the Project column status
+            const baseBranch = (targetStatus === 'DEV') ? 'develop' : 'release'; // Base (Target Branch)
+            
+            // Adjust PR Title for the target branch
+            const dynamicPRTitle = `[${targetStatus} Merge]: ${prTitle}`;
+
+            // --- 4. CREATE THE PULL REQUEST ---
+            console.log(`Creating PR for Issue #${issueNumber} in ${targetCodeRepo}, from ${featureBranch} to ${baseBranch}.`);
+
+            try {
+                const { data: prData } = await github.rest.pulls.create({
+                    owner: owner,
+                    repo: targetCodeRepo, // Target Code Repository
+                    title: dynamicPRTitle,
+                    head: featureBranch,  // The feature branch (Source)
+                    base: baseBranch,     // The dynamic target branch (develop or release)
+                    body: `PR created automatically because the issue was moved to the **${targetStatus}** column.\n\nCloses #${issueNumber}`,
+                    draft: false, // Create as regular PR (not Draft) since it's moving into the pipeline
+                });
+
+                // 5. Comment on the original Issue
+                await github.rest.issues.createComment({
+                    issue_number: issueNumber,
+                    owner: sourceIssueRepoOwner,
+                    repo: issueRepo,
+                    body: `✅ **Pull Request Created** in the repository \`${targetCodeRepo}\` because the Issue was moved to **${targetStatus}**.
+                    
+                    The PR points from branch \`${featureBranch}\` to branch \`${baseBranch}\`.
+                    
+                    [View Pull Request](${prData.html_url})`
+                });
+
+            } catch (error) {
+                // If the feature branch is missing or PR creation fails
+                core.setFailed(`PR creation failed when moving to ${targetStatus}. Error: ${error.message}`);
+                await github.rest.issues.createComment({
+                    issue_number: issueNumber,
+                    owner: sourceIssueRepoOwner,
+                    repo: issueRepo,
+                    body: `**Failed to create the Pull Request** when moving to **${targetStatus}**.
+                    **Reason:** ${error.message}.
+                    
+                    **Checklist:** Please ensure that:
+                    1. The branch \`${featureBranch}\` exists in the code repository.
+                    2. The branch \`${baseBranch}\` exists in the code repository.
+                    3. There are commits in \`${featureBranch}\` that are not in \`${baseBranch}\`.`
+                });
+            }
