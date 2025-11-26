@@ -1,40 +1,43 @@
-name: Azure Boards Gateway
+name: Gateway Dispatcher
 
 on:
   workflow_dispatch:
     inputs:
-      dummy:
-        description: "Dummy input"
-        required: false
+      event_type:
         type: string
+        required: true
+      ticket:
+        type: string
+        required: true
+      prefix:
+        type: string
+        required: true
+      title:
+        type: string
+        required: true
 
 jobs:
-  gateway:
+  dispatch:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Extract Azure Boards Payload
+      - name: Build dispatch payload
         run: |
-          echo "Extracting payload from event.json"
-          cat $GITHUB_EVENT_PATH
-
-          # Work Item ID
-          ID=$(jq -r '.resource.id' $GITHUB_EVENT_PATH)
-          TITLE=$(jq -r '.resource.fields["System.Title"]' $GITHUB_EVENT_PATH)
-          TYPE=$(jq -r '.resource.fields["System.WorkItemType"]' $GITHUB_EVENT_PATH)
-
-          # Logic to pick prefix
-          if [[ "$TYPE" == "Bug" ]]; then PREFIX="bugfix"
-          else PREFIX="feature"
-          fi
-
           cat <<EOF > payload.json
           {
-            "event_type": "create-branch",
+            "event_type": "${{ github.event.inputs.event_type }}",
             "client_payload": {
-              "prefix": "${PREFIX}",
-              "ticket": "CLOUD-${ID}",
-              "title": "${TITLE}"
+              "prefix": "${{ github.event.inputs.prefix }}",
+              "ticket": "${{ github.event.inputs.ticket }}",
+              "title": "${{ github.event.inputs.title }}"
             }
           }
           EOF
+
+      - name: Send repository_dispatch
+        run: |
+          curl -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/JulioQes/POC-LAUREATE-BOARD/dispatches \
+            -d @payload.json
