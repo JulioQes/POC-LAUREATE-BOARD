@@ -71,29 +71,3 @@ jobs:
                 issue_number: issueNumber,
                 head_branch: newBranchName
               });
-
-              // Comment on the Issue
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: issueNumber,
-                body: `✅ **Branch created & linked automatically!**
-
-**Repository:** \`${owner}/${targetRepo}\`
-**Branch:** \`${newBranchName}\`
-
-This branch is now associated with this Issue under **Development**.`
-              });
-
-            } catch (error) {
-              core.setFailed(error.message);
-
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: issueNumber,
-                body: `⚠️ **Error creating or linking branch**
-
-\`${error.message}\``
-              });
-            }
