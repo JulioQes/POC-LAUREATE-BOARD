@@ -1,91 +1,110 @@
 name: Cross-Repo Branch Dispatcher (BE/FE)
 
 on:
-  # Trigger: When an Issue is labeled.
   issues:
     types: [labeled]
 
 jobs:
   create_cross_repo_branch:
     runs-on: ubuntu-latest
-    
-    # Job Condition: Proceed only if a relevant label (BE or FE) is present in the Issue.
+
     if: |
       contains(toJson(github.event.issue.labels.*.name), 'BE') ||
       contains(toJson(github.event.issue.labels.*.name), 'FE')
 
     steps:
-      - name: Create Branch in Target Repo
+      - name: Create Branch in Target Repo + Link to Issue
         uses: actions/github-script@v7
         with:
-          # Use the PAT token with cross-repo write permissions (required for creating branches).
-          github-token: ${{ secrets.GH_PAT }} 
+          github-token: ${{ secrets.GH_PAT }}
           script: |
             const owner = 'JulioQes';
-            const baseBranch = 'main'; // Target base branch (e.g., 'main' or 'dev')
+            const baseBranch = 'main';
 
-            // 1. Identify labels and define the target repository
+            // ----- 1. Determine BE or FE -----
             const labels = context.payload.issue.labels.map(label => label.name);
+            const issueNumber = context.payload.issue.number;
+            const issueTitle = context.payload.issue.title
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, '-')
+              .replace(/^-+|-+$/g, '')
+              .substring(0, 30);
+
             let targetRepo = '';
             let branchPrefix = '';
-            
+
             if (labels.includes('BE')) {
-                targetRepo = 'POC-LAUREATE-BOARD-BE';
-                branchPrefix = 'be/';
+              targetRepo = 'POC-LAUREATE-BOARD-BE';
+              branchPrefix = 'be/';
             } else if (labels.includes('FE')) {
-                targetRepo = 'POC-LAUREATE-BOARD-FE';
-                branchPrefix = 'fe/';
+              targetRepo = 'POC-LAUREATE-BOARD-FE';
+              branchPrefix = 'fe/';
             } else {
-                // If a relevant label is not found, exit.
-                console.log('No target label (BE or FE) found. Skipping branch creation.');
-                return;
+              console.log("No BE/FE label detected — skipping.");
+              return;
             }
 
-            // 2. Format the branch name
-            const issueNumber = context.payload.issue.number;
-            const issueTitle = context.payload.issue.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-*|-*$/g, '').substring(0, 30);
             const newBranchName = `${branchPrefix}issue-${issueNumber}-${issueTitle}`;
-            
-            // 3. Get the SHA of the base branch ('main') from the target repository
-            console.log(`Fetching SHA for ${baseBranch} in ${targetRepo}`);
+
+
             try {
-                const { data: refData } = await github.rest.git.getRef({
-                    owner: owner,
-                    repo: targetRepo,
-                    ref: `heads/${baseBranch}`,
-                });
-                const sha = refData.object.sha;
-                
-                // 4. Create the new branch (reference)
-                console.log(`Creating branch ${newBranchName} in ${targetRepo} with SHA ${sha}`);
-                await github.rest.git.createRef({
-                    owner: owner,
-                    repo: targetRepo,
-                    ref: `refs/heads/${newBranchName}`,
-                    sha: sha,
-                });
+              // ----- 2. Get SHA of main branch in BE/FE -----
+              const { data: refData } = await github.rest.git.getRef({
+                owner,
+                repo: targetRepo,
+                ref: `heads/${baseBranch}`
+              });
 
-                // 5. Comment on the original Issue
-                await github.rest.issues.createComment({
-                    issue_number: context.issue.number,
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    body: ` **Branch created automatically!**
-                    
-                    - **Code Repository:** \`${owner}/${targetRepo}\`
-                    - **Branch Created:** \`${newBranchName}\`
-                    
-                    The Team can now start to work and make **commits** on this branch. Move this Issue to **DEV** when ready for the Pull Request.`
-                });
+              const sha = refData.object.sha;
+
+
+              // ----- 3. Create the new branch in BE/FE -----
+              await github.rest.git.createRef({
+                owner,
+                repo: targetRepo,
+                ref: `refs/heads/${newBranchName}`,
+                sha
+              });
+
+
+              // ----- 4. LINK BRANCH TO THE ORIGINAL ISSUE (REAL MAGIC) -----
+              // Works only because WF + BE + FE repos are tied into the same Project V2.
+              await github.rest.repos.createOrUpdateIssueBranch({
+                owner,                 // repo where the BRANCH lives
+                repo: targetRepo,      // BE/FE repo
+                issue_number: issueNumber,   // Issue in WF repo
+                head_branch: newBranchName
+              });
+
+
+              // ----- 5. Add comment to original Issue -----
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: `
+ **Branch created & linked automatically!**
+
+**Repository:** \`${owner}/${targetRepo}\`  
+**Branch:** \`${newBranchName}\`
+
+This branch is now associated with this Issue under **Development**.
+You may begin implementing changes on this branch.
+                `
+              });
+
+
             } catch (error) {
-                // Error handling block
-                core.setFailed(`Error creating branch in ${targetRepo}: ${error.message}`);
-                await github.rest.issues.createComment({
-                    issue_number: context.issue.number,
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    body: ` **Error creating automatic branch in ${targetRepo}**
+              core.setFailed(error.message);
 
-                    **Error:** ${error.message}`
-                });
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: `
+ **Error creating or linking branch**
+
+\`${error.message}\`
+                `
+              });
             }

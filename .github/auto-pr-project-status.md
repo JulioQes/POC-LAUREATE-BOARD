@@ -1,3 +1,53 @@
+# Auto-PR on Project Status Change
+## Workflow de GitHub Actions para crear Pull Requests automáticos al mover Issues en GitHub Projects
+
+Este workflow crea un **Pull Request automático** cuando un *Issue* es movido a las columnas **DEV** o **QA** dentro de un **GitHub Project (Projects v2)**.
+
+---
+
+# 1. Información General del Workflow
+
+**Nombre del workflow:**  
+`Auto-PR on Project Status Change`
+
+**Funcionalidad principal:**  
+Cuando una tarjeta del Project cambia de columna (Status), el workflow detecta el cambio y:
+
+1. Obtiene los datos del Issue  
+2. Verifica si tiene etiqueta **BE** o **FE**  
+3. Determina en qué repositorio crear el PR  
+4. Determina la rama base según la columna:  
+   - DEV → `develop`  
+   - QA → `release`  
+5. Crea el Pull Request automáticamente
+
+---
+
+# 2. Evento que dispara el Workflow
+
+El workflow se ejecuta cuando un item de Projects v2 es editado:
+
+```yaml
+on:
+  projects_v2_item:
+    types: [edited]
+```
+
+---
+
+# 3. Condición del Job
+
+Verifica que existan cambios detectables:
+
+```yaml
+if: github.event.changes
+```
+
+---
+
+# 4. Código Completo del Workflow
+
+```yaml
 name: Auto-PR on Project Status Change
 
 on:
@@ -34,13 +84,12 @@ jobs:
                 return;
             }
 
-
-            // --- 1. EXTRACT DATA FROM PROJECT EVENT (RESTO DEL SCRIPT ORIGINAL) ---
+            // --- 1. EXTRACT DATA FROM PROJECT EVENT ---
             const issueNumber = context.payload.changes.field_value.field_value.field_value.issue.number;
             const issueRepo = context.payload.changes.field_value.field_value.field_value.issue.repository.name;
             const sourceIssueRepoOwner = context.payload.changes.field_value.field_value.field_value.issue.repository.owner.login;
 
-            // --- 2. FETCH ISSUE DETAILS (Needed to get BE/FE label and full title) ---a
+            // --- 2. FETCH ISSUE DETAILS ---
             const { data: issue } = await github.rest.issues.get({
                 owner: sourceIssueRepoOwner,
                 repo: issueRepo,
@@ -65,13 +114,16 @@ jobs:
 
             // --- 3. CALCULATE BRANCH NAMES AND PR TARGET ---
             const prTitle = issue.title;
-            const cleanTitle = issue.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-*|-*$/g, '').substring(0, 30);
-            const featureBranch = `${branchPrefix}issue-${issueNumber}-${cleanTitle}`; // Head (Source Branch)
+            const cleanTitle = issue.title.toLowerCase()
+              .replace(/[^a-z0-9]+/g, '-')
+              .replace(/^-*|-*$/g, '')
+              .substring(0, 30);
+
+            const featureBranch = `${branchPrefix}issue-${issueNumber}-${cleanTitle}`; // Head (source branch)
             
-            // Set the dynamic base branch based on the Project column status
-            const baseBranch = (targetStatus === 'DEV') ? 'develop' : 'release'; // Base (Target Branch)
+            // Target base branch depending on project status
+            const baseBranch = (targetStatus === 'DEV') ? 'develop' : 'release';
             
-            // Adjust PR Title for the target branch
             const dynamicPRTitle = `[${targetStatus} Merge]: ${prTitle}`;
 
             // --- 4. CREATE THE PULL REQUEST ---
@@ -100,7 +152,7 @@ jobs:
                 });
 
             } catch (error) {
-                // If the feature branch is missing or PR creation fails
+                // If missing branch or PR creation fails
                 core.setFailed(`PR creation failed when moving to ${targetStatus}. Error: ${error.message}`);
                 await github.rest.issues.createComment({
                     issue_number: issueNumber,
@@ -115,3 +167,46 @@ jobs:
                     3. There are commits in \`${featureBranch}\` that are not in \`${baseBranch}\`.`
                 });
             }
+```
+
+---
+
+# 5. Flujo del Sistema
+
+1. El usuario mueve un Issue a la columna **DEV** o **QA**.  
+2. GitHub Projects envía el evento *edited*.  
+3. El workflow detecta el cambio en el campo **Status**.  
+4. Se obtiene el Issue original y sus etiquetas BE/FE.  
+5. Se decide el repositorio destino.  
+6. Se calcula la rama de feature.  
+7. Se abre un Pull Request hacia:
+   - `develop` si va a DEV  
+   - `release` si va a QA  
+8. Se notifica en el Issue.
+
+---
+
+# 6. Requisitos
+
+- Token PAT con permisos completos guardado en:  
+  ```
+  GH_PAT
+  ```
+- Repositorios:
+  - `POC-LAUREATE-BOARD-BE`
+  - `POC-LAUREATE-BOARD-FE`
+- Issues con etiquetas correctas (`BE` o `FE`)
+- Ramas base existentes:
+  - `develop`
+  - `release`
+
+---
+
+# 7. Beneficios
+
+- Automatiza la generación de PR.  
+- Sincroniza Projects → Código.  
+- Evita errores humanos en branches y PR targets.  
+- Mantiene un flujo limpio entre DEV y QA.
+
+---
